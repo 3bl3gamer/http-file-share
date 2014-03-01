@@ -21,13 +21,51 @@ const (
 
 func uploaderCode(uploadDir string) []byte {
 	return []byte(`
-<form action='`+uploadDir+`' method='POST' enctype='multipart/form-data'>
-	<input type='file' name='file'>
-	<input type='submit' value='Send'>
-</form>
-<script>
-	//uploader is coming
-</script>`)
+	<style>
+		input {
+			display: block;
+		}
+	</style>
+	<form id='theForm' action='`+uploadDir+`' method='POST' enctype='multipart/form-data'>
+		<input type='file' name='file'>
+		<input type='submit' value='Send'>
+	</form>
+	<span>Or just drag file to page</span>
+	<br>
+	<br>
+	<script>
+		var elem = document.body;
+		elem.ondragover = function() {
+			this.style.outline = "5px solid blue";
+			return false;
+		}
+		elem.ondragleave = function() {
+			this.style.outline = null;
+			return false;
+		}
+		elem.ondrop = function(e) {
+			e.preventDefault();
+			this.style.outline = null;
+			
+			var form = new FormData();
+			var files = e.dataTransfer.files;
+			for (var i=0; i<files.length; i++) {
+				form.append('file', files[i]);
+			}
+			
+			var xhr = new XMLHttpRequest();
+			//xhr.upload.addEventListener('progress', function uploadProgress(event) {
+			//	var percent = (e.loaded / e.total * 100)|0;
+			//}, false);
+			xhr.open(theForm.method, theForm.action, true);
+			xhr.onreadystatechange = function() {
+				if (xhr.readyState != 4) return;
+				//if (xhr.status != 200) {/*...*/}
+				alert(xhr.responseText);
+			}
+			xhr.send(form);
+		}
+	</script>`)
 }
 
 func serveDir(wr http.ResponseWriter, fd *os.File, path string) error {
@@ -45,11 +83,13 @@ func serveDir(wr http.ResponseWriter, fd *os.File, path string) error {
 	}
 	
 	wr.Header().Set("Content-type", "text/html")
+	wr.Write([]byte("<html>\n\t<head>\n\t\t<title>HFS</title>\n\t</head>\n<body>\n"))
 	wr.Write(uploaderCode(path))
 	wr.Write([]byte("<a href=\""+path+"..\">..</a><br>\n"))
 	for _, name := range names {
 		wr.Write([]byte("<a href=\""+path+name+"\">"+name+"</a><br>\n"))
 	}
+	wr.Write([]byte("</body>\n</html>\n"))
 	
 	return nil
 }
@@ -91,35 +131,40 @@ func servePath(wr http.ResponseWriter, path string) error {
 func serveUpload(wr http.ResponseWriter, req *http.Request) error {
 	reader, err := req.MultipartReader()
 	if err != nil {
-		return err
+		return errors.New("While making reader: "+err.Error())
 	}
 	
-	part, err := reader.NextPart()
-	if err != nil {
-		return err
-	}
+	for {
+		part, err := reader.NextPart()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return errors.New("While reading part: "+err.Error())
+		}
 	
-	name := part.FileName()
-	if name == "" {
-		return errors.New("Empty file name")
-	}
+		name := part.FileName()
+		if name == "" {
+			return errors.New("Empty file name")
+		}
 	
-	//buf := make([]byte, MULTIPART_BUFFER_SIZE, MULTIPART_BUFFER_SIZE)
-	//n, err := part.Read(buf) //io.EOF
+		//buf := make([]byte, MULTIPART_BUFFER_SIZE, MULTIPART_BUFFER_SIZE)
+		//n, err := part.Read(buf) //io.EOF
 	
-	path := "." + req.URL.Path
-	if path[len(path)-1] != '/' {
-		path += "/"
-	}
+		path := "." + req.URL.Path
+		if path[len(path)-1] != '/' {
+			path += "/"
+		}
 	
-	fd, err := os.Create(path + strings.Replace(name, "/", "_", -1))
-	if err != nil {
-		return err
-	}
+		fd, err := os.Create(path + strings.Replace(name, "/", "_", -1))
+		if err != nil {
+			return errors.New("While creating: "+err.Error())
+		}
 	
-	_, err = io.Copy(fd, part)
-	if err != nil {
-		return err
+		_, err = io.Copy(fd, part)
+		if err != nil {
+			return errors.New("While saving <"+name+">: "+err.Error())
+		}
 	}
 	
 	wr.Header().Set("Content-type", "text/plain")
