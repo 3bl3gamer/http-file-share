@@ -9,20 +9,25 @@ import (
 	"strconv"
 	"path/filepath"
 	"errors"
-	//"strings"
+	//"mime/multipart"
+	"strings"
 	//"time"
 )
 
 const (
 	PORT      = 9000
+	MULTIPART_BUFFER_SIZE = 1024
 )
 
-func uploaderCode() []byte {
+func uploaderCode(uploadDir string) []byte {
 	return []byte(`
+<form action='`+uploadDir+`' method='POST' enctype='multipart/form-data'>
+	<input type='file' name='file'>
+	<input type='submit' value='Send'>
+</form>
 <script>
 	//uploader is coming
-</script>
-	`)
+</script>`)
 }
 
 func serveDir(wr http.ResponseWriter, fd *os.File, path string) error {
@@ -31,6 +36,8 @@ func serveDir(wr http.ResponseWriter, fd *os.File, path string) error {
 		return err
 	}
 	
+	// "/bla/bla/" + "filename" -> "/bla/bla/filename"
+	// "/bla/bla" + "bla/filename" -> "/bla/bla/filename"
 	if path[len(path)-1] == '/' {
 		path = ""
 	} else {
@@ -38,10 +45,10 @@ func serveDir(wr http.ResponseWriter, fd *os.File, path string) error {
 	}
 	
 	wr.Header().Set("Content-type", "text/html")
-	wr.Write(uploaderCode())
-	wr.Write([]byte("<a href=\""+path+"..\">..</a><br>"))
+	wr.Write(uploaderCode(path))
+	wr.Write([]byte("<a href=\""+path+"..\">..</a><br>\n"))
 	for _, name := range names {
-		wr.Write([]byte("<a href=\""+path+name+"\">"+name+"</a><br>"))
+		wr.Write([]byte("<a href=\""+path+name+"\">"+name+"</a><br>\n"))
 	}
 	
 	return nil
@@ -61,7 +68,7 @@ func serveFile(wr http.ResponseWriter, fd *os.File, path string) error {
 }
 
 func servePath(wr http.ResponseWriter, path string) error {
-	fd, err := os.Open(path);
+	fd, err := os.Open("."+path);
 	if err != nil {
 		return err
 	}
@@ -81,19 +88,59 @@ func servePath(wr http.ResponseWriter, path string) error {
 	return errors.New("Neither file nor dir");
 }
 
+func serveUpload(wr http.ResponseWriter, req *http.Request) error {
+	reader, err := req.MultipartReader()
+	if err != nil {
+		return err
+	}
+	
+	part, err := reader.NextPart()
+	if err != nil {
+		return err
+	}
+	
+	name := part.FileName()
+	if name == "" {
+		return errors.New("Empty file name")
+	}
+	
+	//buf := make([]byte, MULTIPART_BUFFER_SIZE, MULTIPART_BUFFER_SIZE)
+	//n, err := part.Read(buf) //io.EOF
+	
+	path := "." + req.URL.Path
+	if path[len(path)-1] != '/' {
+		path += "/"
+	}
+	
+	fd, err := os.Create(path + strings.Replace(name, "/", "_", -1))
+	if err != nil {
+		return err
+	}
+	
+	_, err = io.Copy(fd, part)
+	if err != nil {
+		return err
+	}
+	
+	wr.Header().Set("Content-type", "text/plain")
+	wr.Write([]byte("OK"))
+	
+	return nil
+}
+
 func handler(wr http.ResponseWriter, req *http.Request) {
+	var err error
 	switch req.Method {
 	case "GET":
-		err := servePath(wr, "."+req.URL.Path)
-		if err != nil {
-			wr.Header().Set("Content-type", "text/plain")
-			wr.Write([]byte(err.Error()))
-		} else {
-		
-		}
+		err = servePath(wr, req.URL.Path)
 	case "POST":
+		err = serveUpload(wr, req)
+	default:
+		err = errors.New("Unknown method")
+	}
+	if err != nil {
 		wr.Header().Set("Content-type", "text/plain")
-		wr.Write([]byte("POST"))
+		wr.Write([]byte(err.Error()))
 	}
 }
 
