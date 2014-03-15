@@ -16,7 +16,7 @@ import (
 
 const (
 	PORT                  = 9000
-	MULTIPART_BUFFER_SIZE = 1024
+	MULTIPART_BUFFER_SIZE = 1024*1024
 )
 
 func uploaderCode(uploadDir string) []byte {
@@ -25,15 +25,78 @@ func uploaderCode(uploadDir string) []byte {
 		input {
 			display: block;
 		}
+		.file-block {
+			outline: 1px solid;
+		}
 	</style>
+	<div id="fileBlockTemplate" style="display:none;" class="file-block">
+		<span class="file-name"></span>
+		<span class="transfer-progress"></span>
+	</div>
 	<form id='theForm' action='` + uploadDir + `' method='POST' enctype='multipart/form-data'>
-		<input type='file' name='file'>
+		<input id="fileInput" type='file' name='file'>
 		<input type='submit' value='Send'>
 	</form>
 	<span>Or just drag file to page</span>
+	<div id="fileList"></div>
 	<br>
 	<br>
 	<script>
+		Number.prototype.sizefy = function() {
+			if (this < 5*1024) return this+" B";
+			if (this < 5*1024*1024) return ((this/1024)|0)+" KiB";
+			if (this < 5*1024*1024*1024) return ((this/1024/1024)|0)+" MiB";
+			return ((this/1024/1024/1024)|0)+" GiB";
+		}
+		function fileInputOnchange() {
+			if (this.files.length == 0) return;
+			addFiles(this.files);
+			resetFileInput();
+		}
+		function resetFileInput() {
+			fileInput.outerHTML = fileInput.outerHTML;
+			fileInput.onchange = fileInputOnchange;
+		}
+		resetFileInput();
+		function sendFiles(files, onProgress, onEnd) {
+			var form = new FormData();
+			for (var i=0; i<files.length; i++) {
+				form.append('file'+i, files[i]);
+			}
+			
+			var xhr = new XMLHttpRequest();
+			xhr.upload.addEventListener('progress',onProgress, false);
+			xhr.open(theForm.method, theForm.action, true);
+			xhr.onreadystatechange = function() {
+				if (xhr.readyState != 4) return;
+				onEnd(xhr.status, xhr.responseText);
+			}
+			xhr.send(form);
+		}
+		function addFiles(files) {
+			var block = fileBlockTemplate.cloneNode(true);
+			block.id = block.style.display = null;
+			
+			var name = block.getElementsByClassName("file-name")[0];
+			var names = new Array(files.length);
+			for (var i=0; i<files.length; i++) names[i] = files[i].name;
+			name.textContent = names.join(", ");
+			
+			var progressBox = block.getElementsByClassName("transfer-progress")[0];
+			
+			//block.filesToUpload = files;
+			fileList.appendChild(block);
+			var stt = new Date().getTime();
+			sendFiles(files, function(e) {
+				var ct = new Date().getTime();
+				var percent = (e.loaded / e.total * 100)|0;
+				var speed = (e.loaded / (ct-stt) * 1000)|0;
+				progressBox.textContent = percent+"% "+speed.sizefy()+"/s";
+			}, function(status, resText) {
+				progressBox.textContent = resText;
+				if (status == 200) setTimeout(function(){ fileList.removeChild(block) }, 3000);
+			});
+		}
 		var elem = document.body;
 		elem.ondragover = function() {
 			this.style.outline = "5px solid blue";
@@ -46,24 +109,16 @@ func uploaderCode(uploadDir string) []byte {
 		elem.ondrop = function(e) {
 			e.preventDefault();
 			this.style.outline = null;
-			
-			var form = new FormData();
-			var files = e.dataTransfer.files;
-			for (var i=0; i<files.length; i++) {
-				form.append('file', files[i]);
-			}
-			
-			var xhr = new XMLHttpRequest();
-			//xhr.upload.addEventListener('progress', function uploadProgress(event) {
-			//	var percent = (e.loaded / e.total * 100)|0;
-			//}, false);
-			xhr.open(theForm.method, theForm.action, true);
-			xhr.onreadystatechange = function() {
-				if (xhr.readyState != 4) return;
-				//if (xhr.status != 200) {/*...*/}
-				alert(xhr.responseText);
-			}
-			xhr.send(form);
+			addFiles(e.dataTransfer.files);
+//			var length = e.dataTransfer.items.length;
+//			for (var i = 0; i < length; i++) {
+//				var entry = e.dataTransfer.items[i].webkitGetAsEntry();
+//				if (entry.isFile) {
+//					// do whatever you want
+//				} else if (entry.isDirectory) {
+//					// do whatever you want
+//				}
+//			}
 		}
 	</script>`)
 }
